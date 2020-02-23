@@ -1,0 +1,445 @@
+---
+title: "Stat 154 Final Project"
+author: "Audrey Webb, Vahan Aslanyan"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(binr)
+library(car)
+library(missForest)
+library(ggplot2)
+library(dummies)
+library(cluster)
+library(fpc)
+library(corrgram)
+library(tree)
+library(party)
+library(rpart.plot)
+library(caret)
+library(ROCR)
+library(e1071)
+library(ParallelForest)
+library(doParallel)
+library(foreach)
+library(pROC)
+library(ipred)
+```
+
+```{r}
+#Multiple plot function
+#http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+#Reading data
+```{r}
+training <- read.table("adult.data.txt", sep=",", na.strings = "?")
+colnames(training) <- c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week", "native_country", "income")
+
+testing <- read.table("adult.test.txt",sep = ",",na.strings = "?")
+colnames(testing) <- c("age","workclass","fnlwgt","education","education_num","marital_status","occupation","relationship","race","sex","capital_gain","capital_loss","hours_per_week", "native_country", "income")
+#we turn our "?" into NAs
+
+for (i in 1:ncol(training))
+{
+  training[,i]<-gsub("?",NA,training[,i],fixed=TRUE)
+  testing[,i]<-gsub("?",NA,testing[,i],fixed=TRUE)
+}
+```
+
+
+##Preprocessing
+We see that only three variables with missing values. From data dictionary we get the classes of our columns.
+#1) Binning 
+```{r}
+training$age <- as.numeric(training$age)
+training$workclass <- as.factor(training$workclass)
+training$fnlwgt <- NULL
+training$education <- as.factor(training$education)
+levels(training$education) <- c("non_college","non_college","non_college","non_college","non_college","non_college","non_college","college","college","college","college","non_college","college","non_college","college","college")
+training$education_num <- as.numeric(training$education_num)
+training$marital_status <- as.factor(training$marital_status)
+levels(training$marital_status) <- c("Single","Married","Married","Married","Single","Single","Single")
+training$occupation <- as.factor(training$occupation)
+training$relationship <- as.factor(training$relationship)
+training$race <- as.factor(training$race)
+training$sex <- as.factor(training$sex)
+training$capital_gain <- as.numeric(training$capital_gain)
+training$capital_loss <- as.numeric(training$capital_loss)
+training$hours_per_week <- as.numeric(training$hours_per_week)
+training$native_country <- as.factor(training$native_country)
+levels(training$native_country) <- c("Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","US","Non_US","Non_US")
+training$income <- as.factor(training$income)
+```
+#clean this up more
+```{r}
+testing$age <- as.numeric(testing$age)
+testing$workclass <- as.factor(testing$workclass)
+testing$fnlwgt <- NULL
+testing$education <- as.factor(testing$education)
+levels(testing$education) <- c("non_college","non_college","non_college","non_college","non_college","non_college","non_college","college","college","college","college","non_college","college","non_college","college","college")
+testing$education_num <- as.numeric(testing$education_num)
+testing$marital_status <- as.factor(testing$marital_status)
+levels(testing$marital_status) <- c("Single","Married","Married","Married","Single","Single","Single")
+testing$occupation <- as.factor(testing$occupation)
+testing$relationship <- as.factor(testing$relationship)
+testing$race <- as.factor(testing$race)
+testing$sex <- as.factor(testing$sex)
+testing$capital_gain <- as.numeric(testing$capital_gain)
+testing$capital_loss <- as.numeric(testing$capital_loss)
+testing$hours_per_week <- as.numeric(testing$hours_per_week)
+testing$native_country <- as.factor(testing$native_country)
+  levels(testing$native_country) <- c("Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","Non_US","US","Non_US","Non_US")
+testing$income <- as.factor(testing$income)
+```
+
+```{r}
+summary(training)
+```
+
+```{r}
+summary(testing)
+```
+
+```{r}
+training <- training[,c(1,4,10:12,2,3,5:9,13,14)]
+testing <- testing[,c(1,4,10:12,2,3,5:9,13,14)]
+corrgram(training[,1:5], order=TRUE, lower.panel=panel.shade,
+  upper.panel=panel.pie, text.panel=panel.txt)
+```
+
+##Imputing
+'missForest' is used to impute missing values particularly in the case of mixed-type data. It can be used to impute continuous and/or categorical data including complex interactions and nonlinear relations. It yields an out-of-bag (OOB) imputation error estimate. Moreover, it can be run parallel to save computation time.
+```{r}
+training <- as.data.frame(training)
+
+#imputing using missForest
+impute_trainin <- missForest(training,verbose=TRUE)
+
+#turning imputed values into a dataframe
+impute_training <- impute_trainin$ximp
+```
+
+```{r}
+testing <- as.data.frame(testing)
+impute_testin <- missForest(testing,verbose = TRUE)
+impute_testing <- impute_testin$ximp
+```
+
+##Dummification
+```{r}
+training_imputed_dummified <- dummy.data.frame(impute_training[,c(-6,-9,-14)])
+testing_imputed_dummified <- dummy.data.frame(impute_testing[,c(-6,-9,-14)])
+```
+
+```{r}
+income <- training$income
+workclass <- impute_training$workclass
+occupation <- impute_training$occupation
+training_dummy <- data.frame(training_imputed_dummified, workclass, occupation, income)
+levels(training_dummy$income) <- c("below_50K","above_50K")
+colnames(training_dummy) <- gsub("^.*?\\.","", colnames(training_dummy))
+income <- testing$income
+workclass <- impute_testing$workclass
+occupation <- impute_testing$occupation
+testing_dummy <- data.frame(testing_imputed_dummified, workclass, occupation, income)
+levels(testing_dummy$income) <- c("below_50K","above_50K")
+colnames(testing_dummy) <- gsub("^.*?\\.","", colnames(testing_dummy))
+```
+
+##Scaling 
+```{r}
+giant_set <- rbind(training_dummy, testing_dummy)
+for (i in c(1:5))
+{
+  giant_set[,i]<-scale(giant_set[,i])
+}
+
+training_dummy <- giant_set[1:32561,]
+testing_dummy <- giant_set[32562:48842,]
+```
+
+##Visualization
+```{r}
+p1 <- ggplot(data = impute_training, aes(x=impute_training[,14], y=impute_training[,1])) + 
+             geom_boxplot(aes(fill=impute_training[,14])) + labs(x="Income Level", y=colnames(impute_training[,1]), title="Age distribution") + scale_fill_discrete(name="Income levels") + theme_minimal()
+
+p2 <- ggplot(data = impute_training, aes(x=impute_training[,14], y=impute_training[,2])) + 
+             geom_boxplot(aes(fill=impute_training[,14])) + labs(x="Income Level", y=colnames(impute_training[,5]), title="Education num distribution ") + scale_fill_discrete(name="Income levels") + theme_minimal()
+
+p3 <- ggplot(data = impute_training, aes(x=impute_training[,14], y=impute_training[,3])) + 
+             geom_boxplot(aes(fill=impute_training[,14])) + labs(x="Income Level", y=colnames(impute_training[,11]), title="Capital gain distribution ") + scale_fill_discrete(name="Income levels") + theme_minimal()
+
+p4 <- ggplot(data = impute_training, aes(x=impute_training[,14], y=impute_training[,4])) + 
+             geom_boxplot(aes(fill=impute_training[,14])) + labs(x="Income Level", y=colnames(impute_training[,12]), title="Capital loss distribution ") + scale_fill_discrete(name="Income levels") + theme_minimal()
+
+p5 <- ggplot(data = impute_training, aes(x=impute_training[,14], y=impute_training[,5])) + 
+             geom_boxplot(aes(fill=impute_training[,14])) + labs(x="Income Level", y=colnames(impute_training[,13]), title="Hours per week distribution") + scale_fill_discrete(name="Income levels") + theme_minimal()
+
+multiplot(p1,p2,p3,p4,p5,cols=3 )
+```
+
+```{r}
+ggplot(impute_training, aes(x=income, fill=occupation)) + 
+  geom_bar() + facet_grid (. ~ occupation) + theme(strip.text.x = element_blank(), strip.background = element_blank()) + labs(title="Occupation distribution based on income")
+```
+
+```{r}
+ggplot(impute_training, aes(x=income, fill=education)) + 
+  geom_bar() + facet_grid (. ~ sex) + theme_minimal() + labs(title="Income and education")
+```
+
+```{r}
+ggplot(impute_training, aes(x=income, fill=sex)) + geom_bar() + facet_grid (. ~ race) + theme_minimal() + labs(title="Income and Race")
+```
+
+```{r}
+set.seed(154)
+clus <- kmeans(training_imputed_dummified, 2, nstart=100)
+plotcluster(training_imputed_dummified, clus$cluster)
+```
+The two components are the result of applying principle component analysis (PCA, function princomp) on the data. They are linear combinations of the input variables which account for most of the variability of the observations.
+
+
+##Outlier Treatment 
+From boxplots we  can notice that capital gain and loss contain no significant information, so we can ignore them in our subsequent analysis. 
+
+#Classification Trees
+```{r}
+trctrl <- trainControl(method = "repeatedcv",number=10,repeats = 8,search = "grid", savePred=TRUE, verboseIter = TRUE,classProbs = T)
+
+set.seed(154)
+tree_fit <- train(x=training_dummy[,c(1:26)], y=training_dummy[,27], method = "rpart", parms = list(split = "information"), trControl=trctrl, tuneLength = 10)
+```
+
+```{r}
+tree_fit
+```
+
+```{r}
+plot(tree_fit)
+```
+
+```{r}
+prp(tree_fit$finalModel)
+```
+
+```{r}
+tree_predict <- predict(tree_fit, newdata = testing_dummy[,-27])
+confusionMatrix(tree_predict, testing_dummy[,27], positive="above_50K")
+```
+
+```{r}
+tree_prediction <- predict(tree_fit, newdata = testing_dummy[,-27], type="prob")
+
+tree_prediction <- prediction(tree_prediction[,1], testing_dummy[,27])
+tree_performance <- performance(tree_prediction, measure = "tpr", x.measure = "fpr")
+plot(tree_performance, main="ROC curve")
+abline(a=0, b=1, col="blue")
+```
+
+```{r}
+performance(tree_prediction, measure="auc")@y.values[[1]]
+```
+
+
+##Bagging
+```{r}
+#https://www.r-bloggers.com/machine-learning-explained-bagging/
+set.seed(154)
+train_index = sample.int(nrow(training_dummy), size=round(nrow(training_dummy)*0.8), replace = F)
+
+n_model=100
+bagged_models=list()
+for (i in 1:n_model)
+{
+ new_sample = sample(train_index, size=length(train_index), replace=T)
+ bagged_models = c(bagged_models, list(rpart(income~.,training_dummy[new_sample,], control = rpart.control(minsplit=6))))
+}
+
+bagging_data <- training_dummy 
+
+##Getting estimate from the bagged model
+bagged_result=NULL
+i=0
+for (from_bag_model in bagged_models)
+{
+ if (is.null(bagged_result))
+ bagged_result = predict(from_bag_model, bagging_data)
+ else
+ bagged_result = (i*bagged_result + predict(from_bag_model, bagging_data))/(i+1)
+ i=i+1
+}
+```
+
+```{r}
+bagged_result=NULL
+i=0
+for (from_bag_model in bagged_models)
+{
+ if (is.null(bagged_result))
+ bagged_result = predict(from_bag_model, testing_dummy)
+ else
+ bagged_result = (i*bagged_result + predict(from_bag_model, testing_dummy))/(i+1)
+ i=i+1
+}
+```
+
+```{r}
+bagg_factor<-c()
+for (i in 1:nrow(bagged_result))
+{
+  bagg_factor[i] <- ifelse(bagged_result[i,1]>bagged_result[i,2], "below_50K","above_50K")
+}
+
+bagg_factor <- as.factor(bagg_factor)
+confusionMatrix(bagg_factor, testing_dummy[,27], positive = "above_50K")
+```
+
+```{r}
+bagged_prediction <-prediction(bagged_result[, 1], testing_dummy[,27])
+bagged_performance <- performance(bagged_prediction, measure = "tpr", x.measure = "fpr")
+plot(bagged_performance, main="ROC curve")
+abline(a=0, b=1, col="blue")
+```
+
+```{r}
+performance(bagged_prediction, measure="auc")@y.values[[1]]
+```
+
+```{r}
+# Define the tuned parameter
+cvCtrlBAG <- trainControl(number = 10, verboseIter = T, summaryFunction = twoClassSummary, classProbs = TRUE)
+newGridBAG <- expand.grid(mtry = 26)
+
+set.seed(154) 
+bagged_tree_RF <- train(y=training_dummy[,27], x=training_dummy[,c(1:26)], trControl = cvCtrlBAG, method = "rf", tuneGrid = newGridBAG, ntree=100, importance=TRUE)
+```
+
+```{r}
+bagged_tree_RF
+```
+
+```{r}
+varImp(bagged_tree_RF)
+```
+
+```{r}
+bagged_tree_RF_predict <- predict(bagged_tree_RF, testing_dummy[,-27])
+```
+
+```{r}
+confusion_matrix_bagged_RF <- confusionMatrix(bagged_tree_RF_predict, testing_dummy[,27], positive = "above_50K")
+confusion_matrix_bagged_RF
+```
+
+```{r}
+bagged_predict <- predict(bagged_tree_RF, testing_dummy[,-27], type="prob")
+pred_bag <- prediction(as.vector(bagged_predict$below_50K), testing_dummy$income)
+
+perf_AUC_bag <- performance(pred_bag,"auc")
+AUC_bag <- perf_AUC_bag@y.values[[1]]
+perf_ROC_bag = performance(pred_bag, "tpr", "fpr") #plot the actual ROC curve
+plot(perf_ROC_bag, main = "ROC plot")
+abline(a=0, b=1, col="blue")
+```
+
+```{r}
+AUC_bag
+```
+
+##Random Forest
+```{r}
+# Define the tuned parameter
+cvCtrl <- trainControl(method = "repeatedcv", number = 6, repeats = 3, summaryFunction = twoClassSummary, classProbs = TRUE)
+newGrid <- expand.grid(mtry = c(9,11,13))
+
+set.seed(154) 
+Random_Forest <- train(y=training_dummy[,27], x=training_dummy[,c(1:26)], trControl = cvCtrl, method = "rf", tuneGrid = newGrid,ntree=800, importance=TRUE)
+```
+
+```{r}
+randomFOrest_predict <- predict(Random_Forest, newdata = testing_dummy[,-27])
+```
+
+```{r}
+varImp(Random_Forest)
+```
+
+```{r}
+confusion_matrix_randomForest <- confusionMatrix(randomFOrest_predict, testing_dummy[,27], positive = "above_50K")
+confusion_matrix_randomForest
+```
+
+```{r}
+Random_Forest
+```
+
+```{r}
+randomFOrest_predict <- predict(Random_Forest, testing_dummy[,-27], type="prob")
+pred_rf <- prediction(as.vector(randomFOrest_predict$below_50K), testing_dummy$income)
+
+perf_AUC <- performance(pred_rf, "auc")
+AUC <- perf_AUC@y.values[[1]]
+perf_ROC = performance(pred_rf, "tpr", "fpr") #plot the actual ROC curve
+plot(perf_ROC, main="ROC plot")
+abline(a=0, b=1, col="blue")
+```
+
+```{r}
+AUC
+```
+
+```{r}
+plot(Random_Forest)
+```
+
+
+
+
+
+
