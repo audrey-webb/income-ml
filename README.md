@@ -3,7 +3,6 @@
 ### Objective 
 Given a raw data set called “Census Income Data Set” from the UC Irvine Machine Learning Repository, project goal is to predict whether a person makes over 50K a year.
 
-### Content
 #### Part I: Problem Statement
 #### Part II: Introduction
 #### Part III: Data
