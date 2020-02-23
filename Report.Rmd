@@ -1,5 +1,5 @@
 ---
-title: "Stat 154 Final Project"
+title: "Classifying Income Brackets Using Machine Learning Algorithms"
 author: "Audrey Webb, Vahan Aslanyan"
 output: html_document
 ---
